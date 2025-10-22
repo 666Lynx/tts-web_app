@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gemini High-Quality TTS Generator</title>
+    <!-- Load Tailwind CSS for modern styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                }
+            }
+        }
+    </script>
+    <style>
+        /* Custom styles for aesthetics */
+        body {
+            background-color: #f4f7f9;
+        }
+        .tts-card {
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 5px 15px -5px rgba(0, 0, 0, 0.04);
+        }
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<body class="p-4 sm:p-8 flex justify-center items-center min-h-screen font-sans">
+
+    <div id="app" class="tts-card bg-white p-6 sm:p-10 rounded-xl max-w-xl w-full">
+        <h1 class="text-3xl font-extrabold text-gray-900 mb-4">Expressive Audio Generator (Chunking Enabled)</h1>
+        <p class="text-sm text-gray-500 mb-6">Enter long text below. It will be automatically split into chunks (max 200 characters each) and seamlessly stitched together using the Gemini TTS model.</p>
+
+        <!-- Input Area - Removed max length attribute -->
+        <div class="mb-5">
+            <label for="text-input" class="block text-sm font-medium text-gray-700 mb-2">Text to Speak (Unlimited Length)</label>
+            <textarea id="text-input" rows="8"
+                class="w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 transition duration-150 ease-in-out"
+                placeholder="The Automated Chunking Pipeline is now active. This long text will be carefully split at natural breaks, like the end of this sentence, to ensure high-quality, continuous audio generation across multiple API calls. The resulting audio files are then merged into a single playable track. This is ideal for generating audiobooks, long articles, or any substantial body of text.">
+            </textarea>
+        </div>
+
+        <!-- Voice Selection -->
+        <div class="mb-6">
+            <label for="voice-select" class="block text-sm font-medium text-gray-700 mb-2">Select Voice</label>
+            <select id="voice-select"
+                class="w-full p-3 border border-gray-300 bg-white rounded-lg focus:ring-indigo-500 focus:border-indigo-500 appearance-none pr-10">
+                <!-- Options populated by JS -->
+            </select>
+        </div>
+
+        <!-- Action Button -->
+        <button id="generate-button"
+            class="w-full py-3 px-4 bg-indigo-600 text-white font-semibold rounded-lg hover:bg-indigo-700 transition duration-150 ease-in-out focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed">
+            Generate and Play Audio
+        </button>
+
+        <!-- Status & Playback Area -->
+        <div id="status-message" class="mt-4 p-3 rounded-lg text-center hidden"></div>
+        <div id="audio-player-container" class="mt-6 hidden">
+            <audio controls id="audio-player" class="w-full"></audio>
+            <a id="download-link" href="#" download="generated_audio.wav" class="mt-2 block text-center text-sm font-medium text-indigo-600 hover:text-indigo-800">
+                Download Full Audio (.wav)
+            </a>
+        </div>
+
+    </div>
+
+    <script>
+        // Global variables for Firebase context (required by Canvas environment)
+        const apiKey = ""; // API Key is automatically provided by Canvas runtime
+
+        // Configuration
+        const MAX_CHARACTERS_PER_CHUNK = 200; // Optimal length for a single, fast API call
+
+        // TTS Voices provided by the Gemini API
+        const VOICES = [
+            { name: "Zephyr (Bright)", value: "Zephyr" },
+            { name: "Puck (Upbeat)", value: "Puck" },
+            { name: "Charon (Informative)", value: "Charon" },
+            { name: "Kore (Firm)", value: "Kore" },
+            { name: "Fenrir (Excitable)", value: "Fenrir" },
+            { name: "Leda (Youthful)", value: "Leda" },
+            { name: "Achernar (Soft)", value: "Achernar" },
+        ];
+
+        // --- Utility Functions for Audio Conversion and Chunking ---
+
+        /**
+         * Splits text into chunks based on character limit, prioritizing sentence/paragraph breaks.
+         * @param {string} text - The input text.
+         * @returns {string[]} An array of text chunks.
+         */
+        function chunkText(text) {
+            const chunks = [];
+            let remainingText = text.replace(/\s+/g, ' ').trim(); // Normalize whitespace
+
+            while (remainingText.length > 0) {
+                if (remainingText.length <= MAX_CHARACTERS_PER_CHUNK) {
+                    chunks.push(remainingText);
+                    break;
+                }
+
+                // Try to find a natural break near the limit (sentence end: ., ?, !)
+                let chunk = remainingText.substring(0, MAX_CHARACTERS_PER_CHUNK);
+                let breakIndex = -1;
+
+                // Look for a sentence-ending punctuation mark in the latter half of the chunk
+                for (let i = chunk.length - 1; i >= Math.floor(chunk.length / 2); i--) {
+                    if (['.', '?', '!', '\n'].includes(chunk[i])) {
+                        breakIndex = i + 1; // Include the punctuation in the chunk
+                        break;
+                    }
+                }
+
+                if (breakIndex !== -1) {
+                    chunk = remainingText.substring(0, breakIndex).trim();
+                    remainingText = remainingText.substring(breakIndex).trim();
+                } else {
+                    // Fallback: simple character split if no good break found
+                    chunk = remainingText.substring(0, MAX_CHARACTERS_PER_CHUNK).trim();
+                    remainingText = remainingText.substring(MAX_CHARACTERS_PER_CHUNK).trim();
+                }
+
+                if (chunk) chunks.push(chunk);
+            }
+            return chunks;
+        }
+
+        /**
+         * Converts a Base64 string to an ArrayBuffer.
+         */
+        function base64ToArrayBuffer(base64) {
+            const binaryString = atob(base64);
+            const len = binaryString.length;
+            const bytes = new Uint8Array(len);
+            for (let i = 0; i < len; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+            }
+            return bytes.buffer;
+        }
+
+        /**
+         * Creates a full WAV Blob from concatenated 16-bit PCM data.
+         * (This is the core function for stitching the audio segments)
+         * @param {Int16Array} pcm16 - The signed 16-bit PCM data.
+         * @param {number} sampleRate - The sample rate in Hz.
+         * @returns {Blob} A Blob containing the WAV file data.
+         */
+        function createWavBlobFromPCM(pcm16, sampleRate) {
+            const numChannels = 1;
+            const bytesPerSample = 2; // 16-bit PCM
+            const dataLength = pcm16.length * bytesPerSample;
+            const buffer = new ArrayBuffer(44 + dataLength);
+            const view = new DataView(buffer);
+
+            let offset = 0;
+
+            // RIFF chunk descriptor
+            writeString('RIFF', view, offset); offset += 4;
+            view.setUint32(offset, 36 + dataLength, true); offset += 4; // ChunkSize (Total file size - 8)
+            writeString('WAVE', view, offset); offset += 4;
+
+            // FMT sub-chunk
+            writeString('fmt ', view, offset); offset += 4;
+            view.setUint32(offset, 16, true); offset += 4; // Subchunk1Size (16 for PCM)
+            view.setUint16(offset, 1, true); offset += 2; // AudioFormat (1 for PCM)
+            view.setUint16(offset, numChannels, true); offset += 2;
+            view.setUint32(offset, sampleRate, true); offset += 4;
+            view.setUint32(offset, sampleRate * numChannels * bytesPerSample, true); offset += 4; // ByteRate
+            view.setUint16(offset, numChannels * bytesPerSample, true); offset += 2; // BlockAlign
+            view.setUint16(offset, 16, true); offset += 2; // BitsPerSample
+
+            // DATA sub-chunk
+            writeString('data', view, offset); offset += 4;
+            view.setUint32(offset, dataLength, true); offset += 4;
+
+            // Write PCM data
+            for (let i = 0; i < pcm16.length; i++, offset += 2) {
+                view.setInt16(offset, pcm16[i], true);
+            }
+
+            return new Blob([buffer], { type: 'audio/wav' });
+
+            function writeString(s, view, offset) {
+                for (let i = 0; i < s.length; i++) {
+                    view.setUint8(offset + i, s.charCodeAt(i));
+                }
+            }
+        }
+
+        // --- Main TTS Logic ---
+
+        let isGenerating = false;
+
+        /**
+         * Calls the Gemini TTS API for a single chunk.
+         * @returns {object} {pcm16: Int16Array, sampleRate: number}
+         */
+        async function generateChunkAudio(prompt, voiceName, retryCount = 0) {
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${apiKey}`;
+
+            const payload = {
+                contents: [{
+                    parts: [{ text: prompt }]
+                }],
+                generationConfig: {
+                    responseModalities: ["AUDIO"],
+                    speechConfig: {
+                        voiceConfig: {
+                            prebuiltVoiceConfig: { voiceName: voiceName }
+                        }
+                    }
+                },
+                model: "gemini-2.5-flash-preview-tts"
+            };
+
+            const MAX_RETRIES = 5;
+            const INITIAL_DELAY_MS = 1000;
+
+            try {
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (response.status === 429 && retryCount < MAX_RETRIES) {
+                    const delay = INITIAL_DELAY_MS * Math.pow(2, retryCount) + Math.random() * 1000;
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    return generateChunkAudio(prompt, voiceName, retryCount + 1);
+                }
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(`API Request Failed: ${errorData.error?.message || response.statusText}`);
+                }
+
+                const result = await response.json();
+                const part = result?.candidates?.[0]?.content?.parts?.[0];
+                const audioData = part?.inlineData?.data;
+                const mimeType = part?.inlineData?.mimeType;
+
+                if (audioData && mimeType && mimeType.startsWith("audio/L16")) {
+                    const rateMatch = mimeType.match(/rate=(\d+)/);
+                    const sampleRate = rateMatch ? parseInt(rateMatch[1], 10) : 24000;
+
+                    const pcmBuffer = base64ToArrayBuffer(audioData);
+                    const pcm16 = new Int16Array(pcmBuffer);
+
+                    return { pcm16: pcm16, sampleRate: sampleRate };
+
+                } else {
+                    throw new Error("Invalid response structure or missing audio data from API.");
+                }
+
+            } catch (error) {
+                throw new Error(`TTS Generation Error for chunk: ${error.message}`);
+            }
+        }
+
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const textInput = document.getElementById('text-input');
+            const voiceSelect = document.getElementById('voice-select');
+            const generateButton = document.getElementById('generate-button');
+            const statusMessage = document.getElementById('status-message');
+            const audioPlayer = document.getElementById('audio-player');
+            const audioContainer = document.getElementById('audio-player-container');
+            const downloadLink = document.getElementById('download-link');
+
+            // Populate voice options
+            VOICES.forEach(voice => {
+                const option = document.createElement('option');
+                option.value = voice.value;
+                option.textContent = voice.name;
+                voiceSelect.appendChild(option);
+            });
+
+            generateButton.addEventListener('click', async () => {
+                if (isGenerating) return;
+
+                const fullText = textInput.value.trim();
+                const voiceName = voiceSelect.value;
+
+                if (!fullText) {
+                    showMessage("Please enter some text to synthesize.", 'text-red-700 bg-red-100');
+                    return;
+                }
+
+                // Reset UI
+                audioContainer.classList.add('hidden');
+                audioPlayer.src = '';
+                if (audioPlayer.src) URL.revokeObjectURL(audioPlayer.src);
+                downloadLink.href = '#';
+
+                // 1. Chunk the Text
+                const chunks = chunkText(fullText);
+                if (chunks.length === 0) {
+                    showMessage("Could not process text into valid chunks.", 'text-red-700 bg-red-100');
+                    return;
+                }
+
+                // Start loading state
+                isGenerating = true;
+                generateButton.disabled = true;
+                generateButton.textContent = `Processing 0/${chunks.length} chunks...`;
+                showMessage("Starting high-quality audio generation...", 'text-indigo-700 bg-indigo-100');
+
+                let allPcmData = [];
+                let sampleRate = 0;
+                let errorOccurred = false;
+
+                try {
+                    // 2. Generate Audio for Each Chunk Sequentially
+                    for (let i = 0; i < chunks.length; i++) {
+                        const chunk = chunks[i];
+                        generateButton.textContent = `Processing ${i + 1}/${chunks.length} chunks...`;
+                        
+                        // Wait slightly between API calls to respect rate limits
+                        if (i > 0) await new Promise(resolve => setTimeout(resolve, 50)); 
+                        
+                        const audioResult = await generateChunkAudio(chunk, voiceName);
+                        
+                        // Ensure sample rate consistency (should be the same for all chunks)
+                        if (i === 0) {
+                            sampleRate = audioResult.sampleRate;
+                        } else if (sampleRate !== audioResult.sampleRate) {
+                            throw new Error("Sample rates do not match, cannot stitch audio.");
+                        }
+
+                        allPcmData.push(audioResult.pcm16);
+                    }
+
+                    // 3. Concatenate and Create Final WAV
+                    
+                    // First, calculate total length
+                    let totalPcmLength = allPcmData.reduce((sum, arr) => sum + arr.length, 0);
+                    const combinedPcm16 = new Int16Array(totalPcmLength);
+                    let offset = 0;
+                    
+                    // Concatenate the raw PCM data
+                    allPcmData.forEach(arr => {
+                        combinedPcm16.set(arr, offset);
+                        offset += arr.length;
+                    });
+                    
+                    // Create the final WAV Blob
+                    const finalWavBlob = createWavBlobFromPCM(combinedPcm16, sampleRate);
+                    const audioUrl = URL.createObjectURL(finalWavBlob);
+                    
+                    // 4. Update UI
+                    audioPlayer.src = audioUrl;
+                    audioPlayer.play();
+                    
+                    // Enable download link
+                    downloadLink.href = audioUrl;
+                    
+                    audioContainer.classList.remove('hidden');
+                    showMessage(`Successfully generated and stitched ${chunks.length} chunks!`, 'text-green-700 bg-green-100');
+
+                } catch (error) {
+                    console.error("Full Generation Pipeline Error:", error);
+                    showMessage(`Error during generation: ${error.message}`, 'text-red-700 bg-red-100');
+                    errorOccurred = true;
+                } finally {
+                    // End loading state
+                    isGenerating = false;
+                    generateButton.disabled = false;
+                    generateButton.textContent = "Generate and Play Audio";
+                }
+            });
+
+            /**
+             * Displays a temporary status message.
+             */
+            function showMessage(message, styleClass) {
+                statusMessage.textContent = message;
+                statusMessage.className = `mt-4 p-3 rounded-lg text-center ${styleClass}`;
+                statusMessage.classList.remove('hidden');
+            }
+        });
+    </script>
+</body>
+</html>
