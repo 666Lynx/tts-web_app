@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lightweight TTS Auido Generator</title>
+    <!-- Tailwind for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #1B3C53; /* Light blue background */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 1rem;
+            color: #D2C1B6;
+        }
+        .container {
+            width: 100%;
+            max-width: 400px; /* Constrain width for mobile focus */
+            background: #234C6A;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+        }
+        .control-button {
+            transition: all 0.15s ease-in-out;
+        }
+        .control-button:hover:not(:disabled) {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        .record-active {
+            animation: pulse-red 1s infinite;
+        }
+        @keyframes pulse-red {
+            0% { box-shadow: 0 0 0 0 rgba(255, 0, 0, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(255, 0, 0, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(255, 0, 0, 0); }
+        }
+    </style>
+</head>
+<body>
+
+<div class="container p-6 rounded-xl space-y-4">
+    <h1 class="text-2xl font-bold text-center">TTS Audio Generator (On-Device)</h1>
+    <p class="text-sm text-center">Uses your phone's native voice for maximum lightness. Tap "Record" to create a downloadable WAV file.</p>
+
+    <!-- Text Input Area -->
+    <textarea id="textInput" rows="6" class="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none text-gray-700" placeholder="Type the text you want to convert to audio here... (e.g., 'Hello, this is my new custom audio file.')"></textarea>
+
+    <!-- Voice Selector (Populated by JavaScript) -->
+    <div class="flex items-center space-x-2">
+        <label for="voiceSelect" class="text-sm font-medium text-gray-700">Voice:</label>
+        <select id="voiceSelect" class="flex-grow p-2 border border-gray-300 rounded-lg text-sm text-gray-700 focus:ring-blue-500 focus:border-blue-500">
+            <option value="">Loading voices...</option>
+        </select>
+    </div>
+
+    <!-- Controls -->
+    <div class="grid grid-cols-3 gap-3">
+        <!-- Speak Button -->
+        <button id="speakButton" class="control-button py-2 px-4 bg-blue-600 text-white font-semibold rounded-lg shadow-md hover:bg-blue-700 disabled:opacity-50">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 inline-block mr-1" viewBox="0 0 20 20" fill="currentColor">
+              <path fill-rule="evenodd" d="M18 5v8a2 2 0 01-2 2h-5l-5 4v-4H4a2 2 0 01-2-2V5a2 2 0 012-2h12a2 2 0 012 2zM7 8H5v1h2V8zm6 0h-2v1h2V8z" clip-rule="evenodd" />
+            </svg>
+            Speak
+        </button>
+
+        <!-- Record Button -->
+        <button id="recordButton" class="control-button py-2 px-4 bg-[#D2C1B6] text-white font-semibold rounded-lg shadow-md hover:bg-red-700 disabled:opacity-50" disabled>
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 inline-block mr-1" viewBox="0 0 20 20" fill="currentColor">
+              <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd" />
+            </svg>
+            Record
+        </button>
+
+        <!-- Stop/Cancel Button -->
+        <button id="stopButton" class="control-button py-2 px-4 bg-gray-500 text-white font-semibold rounded-lg shadow-md hover:bg-gray-600 disabled:opacity-50" disabled>
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 inline-block mr-1" viewBox="0 0 20 20" fill="currentColor">
+              <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 00-1 1v4a1 1 0 001 1h4a1 1 0 001-1V8a1 1 0 00-1-1H8z" clip-rule="evenodd" />
+            </svg>
+            Stop
+        </button>
+    </div>
+
+    <!-- Download Area (hidden until recording is done) -->
+    <div id="downloadArea" class="hidden mt-4 p-3 bg-green-100 border border-green-300 rounded-lg text-center space-y-2">
+        <p class="text-green-800 font-semibold">Recording Complete!</p>
+        <a id="downloadLink" class="inline-block w-full py-2 px-4 bg-green-600 text-white font-semibold rounded-lg shadow-md hover:bg-green-700" download="tts_audio.wav">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 inline-block mr-2" viewBox="0 0 20 20" fill="currentColor">
+                <path fill-rule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L10 11.586l2.293-2.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clip-rule="evenodd" />
+            </svg>
+            Download Audio File (.wav)
+        </a>
+    </div>
+
+    <!-- Status/Message Area -->
+    <div id="statusMessage" class="text-sm text-center text-gray-500 mt-2">Ready.</div>
+</div>
+
+<script>
+    // Constants for the API calls
+    const MODEL = "gemini-2.5-flash-preview-tts"; // Use flash-tts model for text-to-speech
+
+    // DOM Elements
+    const textInput = document.getElementById('textInput');
+    const speakButton = document.getElementById('speakButton');
+    const recordButton = document.getElementById('recordButton');
+    const stopButton = document.getElementById('stopButton');
+    const voiceSelect = document.getElementById('voiceSelect');
+    const statusMessage = document.getElementById('statusMessage');
+    const downloadArea = document.getElementById('downloadArea');
+    const downloadLink = document.getElementById('downloadLink');
+
+    // State
+    const synth = window.speechSynthesis;
+    let isRecording = false;
+    let mediaRecorder;
+    let audioChunks = [];
+    let audioContext;
+
+    // --- Utility Functions ---
+
+    /**
+     * Converts a Base64 string to an ArrayBuffer.
+     * @param {string} base64 The base64 string
+     * @returns {ArrayBuffer} The array buffer
+     */
+    function base64ToArrayBuffer(base64) {
+        const binaryString = atob(base64);
+        const len = binaryString.length;
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+        }
+        return bytes.buffer;
+    }
+
+    /**
+     * Converts 16-bit PCM audio data to a WAV Blob.
+     * @param {Int16Array} pcm16 16-bit signed PCM data.
+     * @param {number} sampleRate Sample rate of the audio.
+     * @returns {Blob} The WAV audio Blob.
+     */
+    function pcmToWav(pcm16, sampleRate) {
+        // Based on: https://gist.github.com/meijieru/4255140
+        const buffer = new ArrayBuffer(44 + pcm16.length * 2);
+        const view = new DataView(buffer);
+        const dataLength = pcm16.length * 2;
+        const numChannels = 1;
+        const bitsPerSample = 16;
+        const byteRate = sampleRate * numChannels * (bitsPerSample / 8);
+
+        let offset = 0;
+
+        // RIFF chunk descriptor
+        writeString('RIFF');
+        view.setUint32(offset, 36 + dataLength, true); offset += 4;
+        writeString('WAVE');
+
+        // FMT sub-chunk
+        writeString('fmt ');
+        view.setUint32(offset, 16, true); offset += 4; // Sub-chunk size (16 for PCM)
+        view.setUint16(offset, 1, true); offset += 2; // Audio format (1 for PCM)
+        view.setUint16(offset, numChannels, true); offset += 2;
+        view.setUint32(offset, sampleRate, true); offset += 4;
+        view.setUint32(offset, byteRate, true); offset += 4;
+        view.setUint16(offset, numChannels * (bitsPerSample / 8), true); offset += 2; // block align
+        view.setUint16(offset, bitsPerSample, true); offset += 2;
+
+        // DATA sub-chunk
+        writeString('data');
+        view.setUint32(offset, dataLength, true); offset += 4;
+
+        // Write PCM data
+        for (let i = 0; i < pcm16.length; i++, offset += 2) {
+            view.setInt16(offset, pcm16[i], true);
+        }
+
+        return new Blob([view], { type: 'audio/wav' });
+
+        function writeString(s) {
+            for (let i = 0; i < s.length; i++) {
+                view.setUint8(offset + i, s.charCodeAt(i));
+            }
+            offset += s.length;
+        }
+    }
+
+
+    // --- Core Logic ---
+
+    // 1. Web Speech API (Live Playback)
+    const populateVoiceList = () => {
+        const voices = synth.getVoices();
+        if (voices.length === 0) {
+             // If voices aren't loaded yet, try again
+            setTimeout(populateVoiceList, 100);
+            return;
+        }
+
+        voiceSelect.innerHTML = '';
+        const defaultOption = document.createElement('option');
+        defaultOption.textContent = 'Use Default System Voice';
+        defaultOption.value = '';
+        voiceSelect.appendChild(defaultOption);
+
+        voices.forEach((voice, index) => {
+            const option = document.createElement('option');
+            option.textContent = `${voice.name} (${voice.lang})`;
+            option.setAttribute('data-lang', voice.lang);
+            option.setAttribute('data-name', voice.name);
+            option.value = voice.name;
+
+            if (voice.default) {
+                option.textContent += ' (Default)';
+                option.selected = true;
+            }
+
+            voiceSelect.appendChild(option);
+        });
+    }
+
+    if (synth.onvoiceschanged !== undefined) {
+        synth.onvoiceschanged = populateVoiceList;
+    } else {
+        populateVoiceList();
+    }
+
+
+    const startSpeaking = () => {
+        if (synth.speaking) {
+            synth.cancel();
+        }
+
+        const text = textInput.value.trim();
+        if (!text) {
+            statusMessage.textContent = 'Please enter text to speak.';
+            return;
+        }
+
+        const utterance = new SpeechSynthesisUtterance(text);
+        const selectedVoice = voiceSelect.value;
+
+        if (selectedVoice) {
+            const voice = synth.getVoices().find(v => v.name === selectedVoice);
+            if (voice) {
+                utterance.voice = voice;
+            }
+        }
+
+        utterance.onstart = () => {
+            statusMessage.textContent = 'Speaking...';
+            setControlState(true, true);
+        };
+        utterance.onend = () => {
+            if (!isRecording) {
+                 statusMessage.textContent = 'Speech finished.';
+                 setControlState(false, false);
+            }
+        };
+        utterance.onerror = (event) => {
+            console.error('SpeechSynthesisUtterance.onerror', event);
+            statusMessage.textContent = `Error speaking: ${event.error}`;
+            setControlState(false, false);
+        };
+
+        synth.speak(utterance);
+    };
+
+    const stopSpeaking = () => {
+        if (synth.speaking) {
+            synth.cancel();
+        }
+        if (isRecording) {
+            stopRecording();
+        }
+        statusMessage.textContent = 'Stopped.';
+        setControlState(false, false);
+    };
+
+    // 2. Gemini TTS API (Audio File Generation)
+
+    // Helper for Exponential Backoff
+    const MAX_RETRIES = 5;
+    const initialDelay = 1000;
+
+    async function fetchWithBackoff(url, options, retries = 0) {
+        try {
+            const response = await fetch(url, options);
+            if (!response.ok) {
+                // If response is not 429 (Too Many Requests), throw immediately
+                if (response.status !== 429 && response.status !== 503) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                if (retries < MAX_RETRIES) {
+                    const delay = initialDelay * Math.pow(2, retries) + Math.random() * 1000;
+                    console.warn(`Rate limit or temporary error (${response.status}). Retrying in ${delay.toFixed(0)}ms...`);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    return fetchWithBackoff(url, options, retries + 1);
+                }
+            }
+            return response;
+        } catch (error) {
+            if (retries < MAX_RETRIES && error.message.includes('Failed to fetch')) {
+                 const delay = initialDelay * Math.pow(2, retries) + Math.random() * 1000;
+                 await new Promise(resolve => setTimeout(resolve, delay));
+                 return fetchWithBackoff(url, options, retries + 1);
+            }
+            throw error;
+        }
+    }
+
+    const startRecording = async () => {
+        const text = textInput.value.trim();
+        if (!text) {
+            statusMessage.textContent = 'Please enter text to record.';
+            return;
+        }
+
+        // Disable all controls and show loading
+        setControlState(true, true, true);
+        recordButton.classList.add('record-active');
+        statusMessage.textContent = 'Generating audio...';
+        downloadArea.classList.add('hidden');
+
+        try {
+            const voiceName = voiceSelect.value;
+
+            // Construct the API payload
+            const payload = {
+                contents: [{
+                    parts: [{ text: text }]
+                }],
+                generationConfig: {
+                    responseModalities: ["AUDIO"],
+                    speechConfig: {
+                        voiceConfig: {
+                            prebuiltVoiceConfig: { voiceName: voiceName || "Zephyr" } // Use selected voice or default to Zephyr
+                        }
+                    }
+                }
+            };
+
+            const apiKey = "";
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${apiKey}`;
+
+            const response = await fetchWithBackoff(apiUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.error.message || `API request failed with status: ${response.status}`);
+            }
+
+            const result = await response.json();
+            const part = result?.candidates?.[0]?.content?.parts?.[0];
+            const audioData = part?.inlineData?.data;
+            const mimeType = part?.inlineData?.mimeType;
+
+            if (audioData && mimeType && mimeType.startsWith("audio/")) {
+                // The API returns raw signed PCM16 audio data, which we need to convert to WAV
+                const sampleRateMatch = mimeType.match(/rate=(\d+)/);
+                const sampleRate = sampleRateMatch ? parseInt(sampleRateMatch[1], 10) : 24000; // Default to 24kHz
+
+                const pcmData = base64ToArrayBuffer(audioData);
+                const pcm16 = new Int16Array(pcmData);
+
+                const wavBlob = pcmToWav(pcm16, sampleRate);
+                const audioUrl = URL.createObjectURL(wavBlob);
+
+                // Update download link
+                downloadLink.href = audioUrl;
+                downloadLink.download = `tts_recording_${Date.now()}.wav`;
+
+                // Show success message and download link
+                statusMessage.textContent = 'Audio file generated successfully!';
+                downloadArea.classList.remove('hidden');
+
+            } else {
+                throw new Error("Invalid audio response structure from API.");
+            }
+
+        } catch (error) {
+            console.error('Recording Error:', error);
+            statusMessage.textContent = `Error creating audio file: ${error.message}`;
+            // If API fails, try to fall back to native synthesis playback if possible
+            startSpeaking();
+        } finally {
+             // Re-enable controls
+            recordButton.classList.remove('record-active');
+            setControlState(false, false);
+        }
+    };
+
+
+    // --- UI/State Management ---
+
+    /**
+     * Updates the state of the UI buttons.
+     * @param {boolean} isRunning - Is the speech/recording operation currently running?
+     * @param {boolean} isRecordingMode - Is the operation specifically a recording (API call)?
+     * @param {boolean} isGenerating - Is the app waiting for a long process (like API generation)?
+     */
+    const setControlState = (isRunning, isRecordingMode, isGenerating = false) => {
+        speakButton.disabled = isRunning || isGenerating;
+        stopButton.disabled = !isRunning;
+        textInput.disabled = isRunning || isGenerating;
+        voiceSelect.disabled = isRunning || isGenerating;
+
+        // Recording button is only enabled when not running and not generating
+        recordButton.disabled = isRunning || isGenerating;
+
+        if (isGenerating) {
+            recordButton.disabled = true;
+            recordButton.textContent = 'Generating...';
+        } else if (isRecordingMode) {
+             recordButton.textContent = 'Recording...';
+        } else {
+             recordButton.textContent = 'Record';
+        }
+
+        // Hide download area when any operation starts
+        if (isRunning || isGenerating) {
+            downloadArea.classList.add('hidden');
+        }
+    };
+
+    // --- Event Listeners ---
+    speakButton.addEventListener('click', () => {
+        // Use native synthesis for quick playback
+        startSpeaking();
+        downloadArea.classList.add('hidden'); // Ensure download area is hidden
+    });
+
+    recordButton.addEventListener('click', () => {
+        // Use Gemini API for file generation
+        startRecording();
+    });
+
+    stopButton.addEventListener('click', stopSpeaking);
+
+    // Initial state setup
+    setControlState(false, false);
+
+</script>
+
+</body>
+</html>
